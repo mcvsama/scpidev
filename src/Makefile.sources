@@ -1,0 +1,38 @@
+# vim:ts=4
+
+SCPIDEV_SOURCES += scpidev/main.cc
+SCPIDEV_SOURCES += scpidev/scpi_device.cc
+
+SCPIDEV_HEADERS += scpidev/filter.h
+SCPIDEV_HEADERS += scpidev/filter.tcc
+SCPIDEV_HEADERS += scpidev/utils.h
+SCPIDEV_HEADERS += scpidev/scpi_device.h
+
+################
+
+SCPIDEV_OBJECTS += $(call mkobjs, $(SCPIDEV_SOURCES))
+SCPIDEV_MOCSRCS += $(call mkmocs, $(SCPIDEV_MOCHDRS))
+SCPIDEV_MOCOBJS += $(call mkmocobjs, $(SCPIDEV_MOCSRCS))
+
+WATCHDOG_OBJECTS += $(call mkobjs, $(WATCHDOG_SOURCES))
+WATCHDOG_MOCSRCS += $(call mkmocs, $(WATCHDOG_MOCHDRS))
+WATCHDOG_MOCOBJS += $(call mkmocobjs, $(WATCHDOG_MOCSRCS))
+
+SELFTEST_OBJECTS += $(call mkobjs, $(SELFTEST_SOURCES))
+SELFTEST_MOCSRCS += $(call mkmocs, $(SELFTEST_MOCHDRS))
+SELFTEST_MOCOBJS += $(call mkmocobjs, $(SELFTEST_MOCSRCS))
+
+HEADERS += $(SCPIDEV_HEADERS) $(WATCHDOG_HEADERS) $(SELFTEST_HEADERS)
+SOURCES += $(SCPIDEV_SOURCES) $(WATCHDOG_SOURCES) $(SELFTEST_SOURCES)
+MOCSRCS += $(SCPIDEV_MOCSRCS) $(WATCHDOG_MOCSRCS) $(SELFTEST_MOCSRCS)
+MOCOBJS += $(SCPIDEV_MOCOBJS) $(WATCHDOG_MOCOBJS) $(SELFTEST_MOCOBJS)
+
+OBJECTS += $(call mkobjs, $(NODEP_SOURCES))
+OBJECTS += $(call mkobjs, $(SOURCES))
+
+VERSION_FILE := scpidev/version.cc
+TARGETS += $(distdir)/scpidev
+LINKEDS += $(distdir)/scpidev
+
+$(distdir)/scpidev: $(SCPIDEV_OBJECTS) $(SCPIDEV_MOCOBJS) $(call mkobjs, $(NODEP_SOURCES))
+
