@@ -141,23 +141,23 @@ int main()
 	output_log.flush();
 
 	SCPIDevice voltmeter ("voltmeter", QHostAddress (kVoltmeterIP), 5025, "log.v");
-	//SCPIDevice ammeter ("ammeter", QHostAddress (kAmmeterIP), 5025, "log.a");
+	SCPIDevice ammeter ("ammeter", QHostAddress (kAmmeterIP), 5025, "log.a");
 
 	std::cout << "Configuring for test..." << std::endl;
 	voltmeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
 	voltmeter.flush();
-	//ammeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
-	//ammeter.flush();
+	ammeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
+	ammeter.flush();
 
 	configure_voltmeter (voltmeter);
-	//configure_ammeter (ammeter);
+	configure_ammeter (ammeter);
 
 	std::cout << "TCP warmup..." << std::endl;
 	auto kTCPWarmupMessageCommand = "DISPLAY:TEXT \"     TCP warmup...     \"";
 	voltmeter.send (kTCPWarmupMessageCommand);
 	voltmeter.flush();
-	//ammeter.send (kTCPWarmupMessageCommand);
-	//ammeter.flush();
+	ammeter.send (kTCPWarmupMessageCommand);
+	ammeter.flush();
 
 	double initial_voltage = 0.0;
 	double initial_current = 0.0;
@@ -166,22 +166,22 @@ int main()
 	for (int i = 0; i < kACFrequencyHz / kNPLC; ++i)
 	{
 		voltmeter.send ("INITIATE");
-		//ammeter.send ("INITIATE");
+		ammeter.send ("INITIATE");
 
 		initial_voltage = voltmeter.ask ("FETCH?").toDouble();
-		//initial_current = ammeter.ask ("FETCH?").toDouble();
+		initial_current = ammeter.ask ("FETCH?").toDouble();
 	}
 
 	auto kTestMessageCommand = "DISPLAY:TEXT \"Test in progress (voltage)...\"";
 	voltmeter.send (kTestMessageCommand);
-	//ammeter.send (kTestMessageCommand);
+	ammeter.send (kTestMessageCommand);
 
 	// Reset:
 	voltmeter.send ("ABORT");
-	//ammeter.send ("ABORT");
+	ammeter.send ("ABORT");
 	// Start measuring:
 	voltmeter.send ("INITIATE");
-	//ammeter.send ("INITIATE");
+	ammeter.send ("INITIATE");
 
 	double start_timestamp = now();
 	double auto_zero_timestamp = start_timestamp - kAutoZeroPeriodSeconds - 1.0;
@@ -208,7 +208,7 @@ int main()
 	while (g_quit_signal.load() == false)
 	{
 		auto voltage = voltmeter.ask ("FETCH?").toDouble();
-		auto current = 0.0;//ammeter.ask ("FETCH?").toDouble();
+		auto current = ammeter.ask ("FETCH?").toDouble();
 
 		++samples_number;
 
@@ -216,10 +216,10 @@ int main()
 		if (initiate_timestamp - auto_zero_timestamp >= kAutoZeroPeriodSeconds)
 		{
 			voltmeter.send ("SENSE:VOLTAGE:DC:ZERO:AUTO ONCE");
-			//ammeter.send ("SENSE:CURRENT:DC:ZERO:AUTO ONCE");
+			ammeter.send ("SENSE:CURRENT:DC:ZERO:AUTO ONCE");
 
 			voltmeter_temperature = voltmeter.ask ("SYSTEM:TEMPERATURE?").toDouble();
-			ammeter_temperature = 0.0;//ammeter.ask ("SYSTEM:TEMPERATURE?").toDouble();
+			ammeter_temperature = ammeter.ask ("SYSTEM:TEMPERATURE?").toDouble();
 
 			prev_initiate_timestamp = now();
 			auto_zero_timestamp = prev_initiate_timestamp;
@@ -232,7 +232,7 @@ int main()
 
 		// Initiate single measurement:
 		voltmeter.send ("INITIATE");
-		//ammeter.send ("INITIATE");
+		ammeter.send ("INITIATE");
 
 		// Timestamp @ INITIATE command:
 		initiate_timestamp = now();
@@ -282,8 +282,6 @@ int main()
 		out += QString ("        U           = %1 V\n").arg (important (ls (voltage_corrected_filtered)));
 		out += QString ("        I           = %1 A\n").arg (important (ls (current_filtered)));
 		out += QString ("        P           = %1 W\n").arg (important (ls (power_corrected_filtered)));
-		// TODO probably remove
-		out += QString ("       ∫P dt        = %1 Ws = %2 Wh\n").arg (hs (energy_corrected_filtered)).arg (hs (energy_corrected_filtered / 3600.0));
 
 		std::cout << out.toStdString() << std::flush;
 
@@ -310,7 +308,7 @@ int main()
 	std::cout << "\nQuitting.\n";
 
 	voltmeter.send ("DISPLAY:TEXT:CLEAR");
-	//ammeter.send ("DISPLAY:TEXT:CLEAR");
+	ammeter.send ("DISPLAY:TEXT:CLEAR");
 
 	return EXIT_SUCCESS;
 }
