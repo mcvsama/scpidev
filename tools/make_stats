@@ -1,0 +1,56 @@
+#!/usr/bin/env ruby
+# encoding: utf-8
+
+SEPARATOR = ?,
+Columns = ARGV[0].split(',').map(&:to_f)
+ConstantTime = false
+Timebox = 500 # Seconds
+Slice = ARGV[1].to_i || 100
+
+def percentile sorted_values, percentile
+	k = (percentile * (sorted_values.length - 1) + 1).floor - 1
+	f = (percentile * (sorted_values.length - 1) + 1).modulo(1)
+	return sorted_values[k] + (f * (sorted_values[k + 1] - sorted_values[k]))
+end
+
+def mean values
+	return values.inject(0.0) { |sum, el| sum + el }.to_f / values.size
+end
+
+def compute_slice slice
+	slice.reject! { |x| x.strip.empty? }
+	slice.map! { |x| x.strip.split(SEPARATOR).map &:to_f }
+	mean_time = mean(slice.map { |x| x[0] })
+	print "#{mean_time},"
+
+	for column in Columns
+		sorted_values = slice.map { |x| x[column] }.sort
+		p000 = sorted_values.min
+		p025 = percentile(sorted_values, 0.25)
+		p050 = percentile(sorted_values, 0.5)
+		mean = mean(sorted_values)
+		p075 = percentile(sorted_values, 0.75)
+		p100 = sorted_values.max
+		print "#{p000},#{p025},#{mean},#{p075},#{p100},"
+	end
+	puts
+end
+
+if ConstantTime
+	until $stdin.eof? do
+		slice = []
+		total_time = 0
+		while total_time <= Timebox
+			line = $stdin.readline
+			next if line[0] == '#'
+			slice << line
+			total_time = slice[-1].split(SEPARATOR)[0].to_f - slice[0].split(SEPARATOR)[0].to_f
+		end
+		compute_slice slice
+	end
+else
+	for slice in $stdin.each_line.to_a.reject { |l| l.start_with? '#' }.each_slice(Slice)
+		compute_slice slice
+	end
+end
+

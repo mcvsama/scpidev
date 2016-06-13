@@ -1,0 +1,4 @@
+#!/bin/sh
+
+gnuplot visualize-power-last.gp
+
