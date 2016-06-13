@@ -28,9 +28,10 @@ SCPIDevice::SCPIDevice (QString const& name, QHostAddress const& ip_address, uin
 	_log_stream.setDevice (&_log_file);
 	_log_stream << "Opening device '" << _name << "'" << "\n";
 
-	_socket.setSocketOption (QAbstractSocket::LowDelayOption, 1);
 	_socket.connectToHost (ip_address, tcp_port, QIODevice::ReadWrite);
 	_socket.waitForConnected();
+	_socket.setSocketOption (QAbstractSocket::LowDelayOption, 1);
+
 	_stream.setDevice (&_socket);
 }
 

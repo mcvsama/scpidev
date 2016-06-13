@@ -232,7 +232,9 @@ int main()
 
 		// Initiate single measurement:
 		voltmeter.send ("INITIATE");
+		voltmeter.flush();
 		ammeter.send ("INITIATE");
+		ammeter.flush();
 
 		// Timestamp @ INITIATE command:
 		initiate_timestamp = now();
