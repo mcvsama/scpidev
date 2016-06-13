@@ -60,8 +60,8 @@ LD				:= $(CXX)
 LDFLAGS			:= -flto -rdynamic
 AR				:= ar
 MOC				:= $(QT_PREFIX)/bin/moc-qt5
-LIBS			+= m boost_system pthread mhash
-PKGCONFIGS		+= Qt5Core Qt5Network zlib
+LIBS			+= m boost_system
+PKGCONFIGS		+= Qt5Core Qt5Network
 CXXFLAGS_s		:= $(CXXFLAGS)
 ifeq ($(DEBUG),1)
 FEATURES		:=
