@@ -18,6 +18,9 @@
 #include <cstddef>
 #include <iostream>
 
+// Boost:
+#include <boost/format.hpp>
+
 // Qt:
 #include <QDateTime>
 
@@ -51,7 +54,7 @@ template<class Value>
 	inline QString
 	green (QString const& format, Value&& value)
 	{
-		return "\x1B[0;32;49m" + QString::asprintf (format.toUtf8().constData(), value) + "\x1B[0m";
+		return QString::fromStdString ("\x1B[0;32;49m" + (boost::format (format.toStdString()) % value).str() + "\x1B[0m");
 	}
 
 
@@ -59,7 +62,7 @@ template<class Value>
 	inline QString
 	bold (QString const& format, Value&& value)
 	{
-		return "\x1B[1;39;49m" + QString::asprintf (format.toUtf8().constData(), value) + "\x1B[0m";
+		return QString::fromStdString ("\x1B[1;39;49m" + (boost::format (format.toStdString()) % value).str() + "\x1B[0m");
 	}
 
 
@@ -73,14 +76,14 @@ now()
 QString
 hs (double value)
 {
-	return QString::asprintf ("%+11.6f", value);
+	return QString::fromStdString ((boost::format ("%+11.6f") % value).str());
 }
 
 
 QString
 ls (double value)
 {
-	return QString::asprintf ("%+8.3f", value);
+	return QString::fromStdString ((boost::format ("%+8.3f") % value).str());
 }
 
 } // namespace scpidev
