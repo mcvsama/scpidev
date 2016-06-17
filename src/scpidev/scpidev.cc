@@ -127,9 +127,6 @@ catch_sigint (int)
 
 int main()
 {
-	//TODO uncomment ammeter
-	::signal (SIGINT, catch_sigint);
-
 	if (setpriority(PRIO_PROCESS, 0, -20) == -1)
 		std::cout << "Could not set 'nice' to -20." << std::endl;
 
@@ -140,9 +137,14 @@ int main()
 					  "#current_filtered,#power_corrected_filtered,#energy_corrected_filtered\n");
 	output_log.flush();
 
+	std::cout << "Connecting..." << std::endl;
 	SCPIDevice voltmeter ("voltmeter", QHostAddress (kVoltmeterIP), 5025, "log.v");
 	SCPIDevice ammeter ("ammeter", QHostAddress (kAmmeterIP), 5025, "log.a");
 
+	//TODO uncomment ammeter
+	::signal (SIGINT, catch_sigint);
+
+	std::cout << "Press C-c to stop.\n" << std::endl;
 	std::cout << "Configuring for test..." << std::endl;
 	voltmeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
 	voltmeter.flush();
