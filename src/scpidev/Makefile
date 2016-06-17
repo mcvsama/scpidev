@@ -1,1 +1,1 @@
-/home/mcv/git/scpidev/src/Makefile.up
+../Makefile.up
