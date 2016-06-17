@@ -1,6 +1,6 @@
 # vim:ts=4
 
-SCPIDEV_SOURCES += scpidev/main.cc
+SCPIDEV_SOURCES += scpidev/scpidev.cc
 SCPIDEV_SOURCES += scpidev/scpi_device.cc
 
 SCPIDEV_HEADERS += scpidev/filter.h
