@@ -16,6 +16,11 @@
 #include <iostream>
 #include <memory>
 #include <atomic>
+#include <queue>
+#include <mutex>
+#include <thread>
+
+// Linux:
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -23,17 +28,24 @@
 // Qt:
 #include <QFile>
 #include <QTextStream>
+#include <QSemaphore>
+#include <QDir>
 
-// Local:
-#include "scpi_device.h"
-#include "filter.h"
-#include "utils.h"
+// Boost:
+#include <boost/optional.hpp>
+
+// SCPIDev:
+#include <scpidev/filter.h>
+#include <scpidev/scpi_device.h>
+#include <scpidev/utils.h>
+#include <utility/file_db.h>
 
 
 using namespace scpidev;
 
 constexpr char kVoltmeterIP[] = "11.0.0.100";
 constexpr char kAmmeterIP[] = "11.0.0.101";
+constexpr char kOutputDir[] = "scpidev.log";
 
 constexpr float kNPLC = 1;
 constexpr double kAutoZeroPeriodSeconds = 10;
@@ -41,6 +53,44 @@ constexpr double kACFrequencyHz = 50.0;
 constexpr double kTotalVoltmeterBurdenResitanceOhms = 0.025666;
 
 std::atomic<bool> g_quit_signal { false };
+
+
+/**
+ * Single sample from all DMMs.
+ */
+class Sample
+{
+  public:
+	uint64_t	number						= 0;
+	uint64_t	timing_errors				= 0;
+	QString		timing_errors_s;
+	double		start_timestamp				= 0.0;
+	double		initiate_timestamp			= 0.0;
+	double		auto_zero_timestamp			= 0.0;
+	double		dt							= 0.0;
+	double		max_dt						= 0.0;
+	std::size_t	filter_taps					= 0;
+
+	// Measurements:
+	double		power						= 0.0;
+	double		energy						= 0.0;
+	double		voltage_error				= 0.0;
+	double		voltage_corrected			= 0.0;
+	double		power_corrected				= 0.0;
+	double		energy_corrected			= 0.0;
+	double		voltage_corrected_filtered	= 0.0;
+	double		current_filtered			= 0.0;
+	double		power_corrected_filtered	= 0.0;
+	double		energy_corrected_filtered	= 0.0;
+
+	// Voltmeter:
+	double		voltage					 	= 0.0;
+	double		voltmeter_temperature		= 0.0;
+
+	// Ammeter:
+	double		current						= 0.0;
+	double		ammeter_temperature			= 0.0;
+};
 
 
 void
@@ -125,27 +175,15 @@ catch_sigint (int)
 }
 
 
-int main()
+/**
+ * Thread for communication with DMMs.
+ */
+void
+measure_function (SCPIDevice& voltmeter, SCPIDevice& ammeter, std::queue<Sample>& samples_todo, std::mutex& samples_mutex, QSemaphore& samples_semaphore)
 {
 	if (setpriority(PRIO_PROCESS, 0, -20) == -1)
 		std::cout << "Could not set 'nice' to -20." << std::endl;
 
-	QFile output_log ("log");
-	output_log.open (QIODevice::Append);
-	output_log.write ("#timestamp,#voltage,#voltmeter_temperature,#current,#ammeter_temperature,#power,"
-					  "#energy,#voltage_corrected,#power_corrected,#energy_corrected,#voltage_corrected_filtered,"
-					  "#current_filtered,#power_corrected_filtered,#energy_corrected_filtered\n");
-	output_log.flush();
-
-	std::cout << "Connecting..." << std::endl;
-	SCPIDevice voltmeter ("voltmeter", QHostAddress (kVoltmeterIP), 5025, "log.v");
-	SCPIDevice ammeter ("ammeter", QHostAddress (kAmmeterIP), 5025, "log.a");
-
-	//TODO uncomment ammeter
-	::signal (SIGINT, catch_sigint);
-
-	std::cout << "Press C-c to stop.\n" << std::endl;
-	std::cout << "Configuring for test..." << std::endl;
 	voltmeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
 	voltmeter.flush();
 	ammeter.send ("DISPLAY:TEXT \"Configuring for test...\"");
@@ -190,6 +228,7 @@ int main()
 
 	double voltmeter_temperature = 0.0;
 	double ammeter_temperature = 0.0;
+
 	double energy = 0.0;
 	double energy_corrected = 0.0;
 	double energy_corrected_filtered = 0.0;
@@ -207,12 +246,12 @@ int main()
 	Filter<filter_taps> voltage_corrected_filter (initial_voltage);
 	Filter<filter_taps> current_filter (initial_current);
 
-	while (g_quit_signal.load() == false)
+	while (!g_quit_signal.load())
 	{
-		auto voltage = voltmeter.ask ("FETCH?").toDouble();
-		auto current = ammeter.ask ("FETCH?").toDouble();
-
-		++samples_number;
+		Sample sample;
+		sample.number = ++samples_number;
+		sample.voltage = voltmeter.ask ("FETCH?").toDouble();
+		sample.current = ammeter.ask ("FETCH?").toDouble();
 
 		// Auto-zero and temperature read:
 		if (initiate_timestamp - auto_zero_timestamp >= kAutoZeroPeriodSeconds)
@@ -232,6 +271,11 @@ int main()
 			timing_errors_s = erroneous (QString::number (timing_errors));
 		}
 
+		sample.voltmeter_temperature = voltmeter_temperature;
+		sample.ammeter_temperature = ammeter_temperature;
+		sample.timing_errors = timing_errors;
+		sample.timing_errors_s = timing_errors_s;
+
 		// Initiate single measurement:
 		voltmeter.send ("INITIATE");
 		voltmeter.flush();
@@ -244,70 +288,160 @@ int main()
 		max_dt = std::max (dt, max_dt);
 
 		// Calculations:
-		double power = voltage * current;
-		energy += power * dt;
+		sample.power = sample.voltage * sample.current;
+		energy += sample.power * dt;
+		sample.energy = energy;
 		// Corrections:
-		double voltage_error = current * kTotalVoltmeterBurdenResitanceOhms;
-		double voltage_corrected = voltage - voltage_error;
-		double power_corrected = voltage_corrected * current;
-		energy_corrected += power_corrected * dt;
+		sample.voltage_error = sample.current * kTotalVoltmeterBurdenResitanceOhms;
+		sample.voltage_corrected = sample.voltage - sample.voltage_error;
+		sample.power_corrected = sample.voltage_corrected * sample.current;
+		energy_corrected += sample.power_corrected * dt;
+		sample.energy_corrected = energy_corrected;
 		// Filtering:
-		double voltage_corrected_filtered = voltage_corrected_filter.process (voltage_corrected);
-		double current_filtered = current_filter.process (current);
-		double power_corrected_filtered = voltage_corrected_filtered * current_filtered;
-		energy_corrected_filtered += power_corrected_filtered * dt;
+		sample.voltage_corrected_filtered = voltage_corrected_filter.process (sample.voltage_corrected);
+		sample.current_filtered = current_filter.process (sample.current);
+		sample.power_corrected_filtered = sample.voltage_corrected_filtered * sample.current_filtered;
+		energy_corrected_filtered += sample.power_corrected_filtered * dt;
+		sample.energy_corrected_filtered = energy_corrected_filtered;
 
-		QString out;
-		out += "\x1B[H\x1B[2J";
-		out += QString ("now = %1 s   elapsed = %2 s   since last autozero = %3 s\n").arg (bold ("%-.3f", initiate_timestamp))
-			.arg (bold ("%+6.1f", initiate_timestamp - start_timestamp)).arg (bold ("%+6.1f", initiate_timestamp - auto_zero_timestamp));
-		out += QString (" dt = %1 s            max dt = %2 s         timing errors = %3\n")
-			.arg (bold ("%+.3f", dt)).arg (bold ("%+.3f", max_dt)).arg (timing_errors_s);
-		out += "\n";
-		out += QString ("    PLC/sample                        = %1\n").arg (kNPLC);
-		out += QString ("    Voltmeter-motherboard resistance  = %1 Ω\n").arg (kTotalVoltmeterBurdenResitanceOhms);
-		out += "\n";
-		out += QString ("    Voltmeter temperature             = %1°C\n").arg (green ("%.3f", voltmeter_temperature));
-		out += QString ("    Ammeter temperature               = %1°C\n").arg (green ("%.3f", ammeter_temperature));
-		out += QString ("    Samples                           = %1\n").arg (samples_number);
-		out += "\n";
-		out += QString ("    Raw measurements:\n");
-		out += QString ("        U           = %1 V\n").arg (hs (voltage));
-		out += QString ("        I           = %1 A\n").arg (important (hs (current)));
-		out += QString ("        P           = %1 W\n").arg (hs (power));
-		out += QString ("       ∫P dt        = %1 Ws = %2 Wh\n").arg (hs (energy)).arg (hs (energy / 3600.0));
-		out += "\n";
-		out += QString ("    Corrected measurements:\n");
-		out += QString ("        U           = %1 V (error = %2 V)\n").arg (important (hs (voltage_corrected))).arg (hs (voltage_error));
-		out += QString ("        P           = %1 W (error = %2 W)\n").arg (important (hs (power_corrected))).arg (hs (power - power_corrected));
-		out += QString ("       ∫P dt        = %1 Ws = %2 Wh\n").arg (hs (energy_corrected)).arg (important (hs (energy_corrected / 3600.0)));
-		out += "\n";
-		out += QString ("    Filtered measurements (%1 taps, Hann):\n").arg (filter_taps);
-		out += QString ("        U           = %1 V\n").arg (important (ls (voltage_corrected_filtered)));
-		out += QString ("        I           = %1 A\n").arg (important (ls (current_filtered)));
-		out += QString ("        P           = %1 W\n").arg (important (ls (power_corrected_filtered)));
+		sample.dt = dt;
+		sample.max_dt = max_dt;
+		sample.start_timestamp = start_timestamp;
+		sample.initiate_timestamp = initiate_timestamp;
+		sample.auto_zero_timestamp = auto_zero_timestamp;
+		sample.filter_taps = filter_taps;
 
-		std::cout << out.toStdString() << std::flush;
-
-		output_log.write (QString("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14\n")
-						  .arg (initiate_timestamp, 0, 'f', 6)
-						  .arg (voltage, 0, 'f', 9)
-						  .arg (voltmeter_temperature, 0, 'f', 3)
-						  .arg (current, 0, 'f', 9)
-						  .arg (ammeter_temperature, 0, 'f', 3)
-						  .arg (power, 0, 'f', 18)
-						  .arg (energy, 0, 'f', 18)
-						  .arg (voltage_corrected, 0, 'f', 18)
-						  .arg (power_corrected, 0, 'f', 18)
-						  .arg (energy_corrected, 0, 'f', 18)
-						  .arg (voltage_corrected_filtered, 0, 'f', 9)
-						  .arg (current_filtered, 0, 'f', 6)
-						  .arg (power_corrected_filtered, 0, 'f', 18)
-						  .arg (energy_corrected_filtered, 0, 'f', 18)
-						  .toUtf8());
+		{
+			std::lock_guard<std::mutex> lock (samples_mutex);
+			samples_todo.push (sample);
+		}
+		samples_semaphore.release (1);
 
 		prev_initiate_timestamp = initiate_timestamp;
 	}
+}
+
+
+/**
+ * Log single sample to an output file.
+ */
+void
+log_sample (Sample const& sample, FileDB& file_db)
+{
+	auto output_log = file_db.get_file_for_timestamp (sample.initiate_timestamp);
+
+	output_log->write (QString("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14\n")
+					   .arg (sample.initiate_timestamp, 0, 'f', 6)
+					   .arg (sample.voltage, 0, 'f', 9)
+					   .arg (sample.voltmeter_temperature, 0, 'f', 3)
+					   .arg (sample.current, 0, 'f', 9)
+					   .arg (sample.ammeter_temperature, 0, 'f', 3)
+					   .arg (sample.power, 0, 'f', 18)
+					   .arg (sample.energy, 0, 'f', 18)
+					   .arg (sample.voltage_corrected, 0, 'f', 18)
+					   .arg (sample.power_corrected, 0, 'f', 18)
+					   .arg (sample.energy_corrected, 0, 'f', 18)
+					   .arg (sample.voltage_corrected_filtered, 0, 'f', 9)
+					   .arg (sample.current_filtered, 0, 'f', 6)
+					   .arg (sample.power_corrected_filtered, 0, 'f', 18)
+					   .arg (sample.energy_corrected_filtered, 0, 'f', 18)
+					   .toUtf8());
+}
+
+
+/**
+ * Thread for writing log file and updating screen (on stdout).
+ */
+void
+log_function (std::queue<Sample>& samples_todo, std::mutex& samples_mutex, QSemaphore& samples_semaphore)
+{
+	FileDB file_db { QDir (kOutputDir) };
+
+	do {
+		samples_semaphore.acquire (1);
+		std::vector<Sample> samples;
+
+		{
+			std::lock_guard<std::mutex> lock (samples_mutex);
+			while (!samples_todo.empty())
+			{
+				samples.push_back (samples_todo.front());
+				samples_todo.pop();
+			}
+		}
+
+		for (auto& sample: samples)
+			log_sample (sample, file_db);
+
+		if (!samples.empty())
+		{
+			// Only display the latest sample:
+			auto& sample = samples.back();
+
+			QString out;
+			out += "\x1B[H\x1B[2J";
+			out += QString ("now = %1 s   elapsed = %2 s   since last autozero = %3 s\n").arg (bold ("%-.3f", sample.initiate_timestamp))
+				.arg (bold ("%+6.1f", sample.initiate_timestamp - sample.start_timestamp)).arg (bold ("%+6.1f", sample.initiate_timestamp - sample.auto_zero_timestamp));
+			out += QString (" dt = %1 s            max dt = %2 s         timing errors = %3\n")
+				.arg (bold ("%+.3f", sample.dt)).arg (bold ("%+.3f", sample.max_dt)).arg (sample.timing_errors_s);
+			out += QString (" queue = %1\n").arg (samples_semaphore.available());
+			out += "\n";
+			out += QString ("    PLC/sample                        = %1\n").arg (kNPLC);
+			out += QString ("    Voltmeter-motherboard resistance  = %1 Ω\n").arg (kTotalVoltmeterBurdenResitanceOhms);
+			out += "\n";
+			out += QString ("    Voltmeter temperature             = %1°C\n").arg (green ("%.3f", sample.voltmeter_temperature));
+			out += QString ("    Ammeter temperature               = %1°C\n").arg (green ("%.3f", sample.ammeter_temperature));
+			out += QString ("    Samples                           = %1\n").arg (sample.number);
+			out += "\n";
+			out += QString ("    Raw measurements:\n");
+			out += QString ("        U           = %1 V\n").arg (hs (sample.voltage));
+			out += QString ("        I           = %1 A\n").arg (important (hs (sample.current)));
+			out += QString ("        P           = %1 W\n").arg (hs (sample.power));
+			out += QString ("       ∫P dt        = %1 Ws = %2 Wh\n").arg (hs (sample.energy)).arg (hs (sample.energy / 3600.0));
+			out += "\n";
+			out += QString ("    Corrected measurements:\n");
+			out += QString ("        U           = %1 V (error = %2 V)\n").arg (important (hs (sample.voltage_corrected))).arg (hs (sample.voltage_error));
+			out += QString ("        P           = %1 W (error = %2 W)\n").arg (important (hs (sample.power_corrected))).arg (hs (sample.power - sample.power_corrected));
+			out += QString ("       ∫P dt        = %1 Ws = %2 Wh\n").arg (hs (sample.energy_corrected)).arg (important (hs (sample.energy_corrected / 3600.0)));
+			out += "\n";
+			out += QString ("    Filtered measurements (%1 taps, Hann):\n").arg (sample.filter_taps);
+			out += QString ("        U           = %1 V\n").arg (important (ls (sample.voltage_corrected_filtered)));
+			out += QString ("        I           = %1 A\n").arg (important (ls (sample.current_filtered)));
+			out += QString ("        P           = %1 W\n").arg (important (ls (sample.power_corrected_filtered)));
+
+			std::cout << out.toStdString() << std::flush;
+		}
+	} while (!g_quit_signal.load());
+}
+
+
+int main()
+{
+	if (!g_quit_signal.is_lock_free())
+		throw std::runtime_error ("this platform or binary doesn't have lock-free atomics");
+
+	std::cout << "Connecting..." << std::endl;
+	SCPIDevice voltmeter ("voltmeter", QHostAddress (kVoltmeterIP), 5025, "log.v");
+	SCPIDevice ammeter ("ammeter", QHostAddress (kAmmeterIP), 5025, "log.a");
+
+	::signal (SIGINT, catch_sigint);
+
+	std::cout << "Press C-c to stop.\n" << std::endl;
+	std::cout << "Configuring for test..." << std::endl;
+	QSemaphore samples_semaphore;
+	std::queue<Sample> samples_queue;
+	std::mutex samples_mutex;
+
+	std::thread measure_thread (measure_function,
+								std::ref (voltmeter), std::ref (ammeter),
+								std::ref (samples_queue), std::ref (samples_mutex),
+								std::ref (samples_semaphore));
+
+	std::thread log_thread (log_function,
+							std::ref (samples_queue), std::ref (samples_mutex), std::ref (samples_semaphore));
+
+	measure_thread.join();
+	log_thread.join();
 
 	std::cout << "\nQuitting.\n";
 

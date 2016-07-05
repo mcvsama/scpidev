@@ -8,24 +8,38 @@ SCPIDEV_HEADERS += scpidev/filter.tcc
 SCPIDEV_HEADERS += scpidev/utils.h
 SCPIDEV_HEADERS += scpidev/scpi_device.h
 
+SCPIDEVD_SOURCES += scpidevd/scpidevd.cc
+SCPIDEVD_SOURCES += scpidevd/json_protocol.cc
+SCPIDEVD_SOURCES += scpidevd/requests_handler.cc
+
+SCPIDEVD_HEADERS += scpidevd/json_protocol.h
+SCPIDEVD_HEADERS += scpidevd/requests_handler.h
+
+COMMON_SOURCES += utility/file_db.cc
+
+COMMON_HEADERS += utility/file_db.h
+
+################
+
+SCPIDEV_SOURCES += $(COMMON_SOURCES)
+SCPIDEV_HEADERS += $(COMMON_HEADERS)
+SCPIDEVD_SOURCES += $(COMMON_SOURCES)
+SCPIDEVD_HEADERS += $(COMMON_HEADERS)
+
 ################
 
 SCPIDEV_OBJECTS += $(call mkobjs, $(SCPIDEV_SOURCES))
 SCPIDEV_MOCSRCS += $(call mkmocs, $(SCPIDEV_MOCHDRS))
 SCPIDEV_MOCOBJS += $(call mkmocobjs, $(SCPIDEV_MOCSRCS))
 
-WATCHDOG_OBJECTS += $(call mkobjs, $(WATCHDOG_SOURCES))
-WATCHDOG_MOCSRCS += $(call mkmocs, $(WATCHDOG_MOCHDRS))
-WATCHDOG_MOCOBJS += $(call mkmocobjs, $(WATCHDOG_MOCSRCS))
+SCPIDEVD_OBJECTS += $(call mkobjs, $(SCPIDEVD_SOURCES))
+SCPIDEVD_MOCSRCS += $(call mkmocs, $(SCPIDEVD_MOCHDRS))
+SCPIDEVD_MOCOBJS += $(call mkmocobjs, $(SCPIDEVD_MOCSRCS))
 
-SELFTEST_OBJECTS += $(call mkobjs, $(SELFTEST_SOURCES))
-SELFTEST_MOCSRCS += $(call mkmocs, $(SELFTEST_MOCHDRS))
-SELFTEST_MOCOBJS += $(call mkmocobjs, $(SELFTEST_MOCSRCS))
-
-HEADERS += $(SCPIDEV_HEADERS) $(WATCHDOG_HEADERS) $(SELFTEST_HEADERS)
-SOURCES += $(SCPIDEV_SOURCES) $(WATCHDOG_SOURCES) $(SELFTEST_SOURCES)
-MOCSRCS += $(SCPIDEV_MOCSRCS) $(WATCHDOG_MOCSRCS) $(SELFTEST_MOCSRCS)
-MOCOBJS += $(SCPIDEV_MOCOBJS) $(WATCHDOG_MOCOBJS) $(SELFTEST_MOCOBJS)
+HEADERS += $(SCPIDEV_HEADERS) $(SCPIDEVD_HEADERS)
+SOURCES += $(SCPIDEV_SOURCES) $(SCPIDEVD_SOURCES)
+MOCSRCS += $(SCPIDEV_MOCSRCS) $(SCPIDEVD_MOCSRCS)
+MOCOBJS += $(SCPIDEV_MOCOBJS) $(SCPIDEVD_MOCOBJS)
 
 OBJECTS += $(call mkobjs, $(NODEP_SOURCES))
 OBJECTS += $(call mkobjs, $(SOURCES))
@@ -33,6 +47,9 @@ OBJECTS += $(call mkobjs, $(SOURCES))
 VERSION_FILE := scpidev/version.cc
 TARGETS += $(distdir)/scpidev
 LINKEDS += $(distdir)/scpidev
+TARGETS += $(distdir)/scpidevd
+LINKEDS += $(distdir)/scpidevd
 
 $(distdir)/scpidev: $(SCPIDEV_OBJECTS) $(SCPIDEV_MOCOBJS) $(call mkobjs, $(NODEP_SOURCES))
+$(distdir)/scpidevd: $(SCPIDEVD_OBJECTS) $(SCPIDEVD_MOCOBJS) $(call mkobjs, $(NODEP_SOURCES))
 
