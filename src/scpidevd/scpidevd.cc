@@ -35,18 +35,18 @@
 // SCPIDevD:
 #include <scpidevd/json_protocol.h>
 #include <scpidevd/requests_handler.h>
+#include <utility/unix_signaller.h>
 
 
 constexpr uint16_t kTcpListenPort = 5026;
 
-std::atomic<bool> g_quit_signal { false };
+std::unique_ptr<UnixSignaller> g_unix_signaller;
 
 
 void
-catch_sigint (int)
+catch_sigint (int signum)
 {
-	g_quit_signal.store (true);
-	// TODO send signal to QCoreApplication::quit()
+	g_unix_signaller->post (signum);
 	// Restore original handler, so if user sends SIGINT twice, the second one will forcefully stop
 	// the process:
 	::signal (SIGINT, SIG_DFL);
@@ -56,8 +56,6 @@ catch_sigint (int)
 int main (int argc, char** argv)
 {
 	try {
-		::signal (SIGINT, catch_sigint);
-
 		auto event_loop = std::make_unique<QCoreApplication> (argc, argv);
 		RequestsHandler requests_handler;
 		JSONProtocol json_protocol (requests_handler);
@@ -76,8 +74,16 @@ int main (int argc, char** argv)
 			json_protocol.new_connection (socket);
 		});
 
-		QObject::connect (server.get(), &QTcpServer::acceptError, [&] (QAbstractSocket::SocketError error) {
+		QObject::connect (server.get(), &QTcpServer::acceptError, [&](QAbstractSocket::SocketError error) {
 			std::cout << "Failed to accept connection (error code: " << error << ")." << std::endl;
+		});
+
+		g_unix_signaller = std::make_unique<UnixSignaller>();
+		::signal (SIGINT, catch_sigint);
+
+		QObject::connect (g_unix_signaller.get(), &UnixSignaller::got_signal, [&](int signum) {
+			if (signum == SIGINT)
+				event_loop->quit();
 		});
 
 		event_loop->exec();

@@ -16,15 +16,22 @@ SCPIDEVD_HEADERS += scpidevd/json_protocol.h
 SCPIDEVD_HEADERS += scpidevd/requests_handler.h
 
 COMMON_SOURCES += utility/file_db.cc
+COMMON_SOURCES += utility/unix_signaller.cc
 
 COMMON_HEADERS += utility/file_db.h
+COMMON_HEADERS += utility/unix_signaller.h
+
+COMMON_MOCHDRS += utility/unix_signaller.h
 
 ################
 
 SCPIDEV_SOURCES += $(COMMON_SOURCES)
 SCPIDEV_HEADERS += $(COMMON_HEADERS)
+SCPIDEV_MOCHDRS += $(COMMON_MOCHDRS)
+
 SCPIDEVD_SOURCES += $(COMMON_SOURCES)
 SCPIDEVD_HEADERS += $(COMMON_HEADERS)
+SCPIDEVD_MOCHDRS += $(COMMON_MOCHDRS)
 
 ################
 
